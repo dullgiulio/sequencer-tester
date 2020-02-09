@@ -7,6 +7,16 @@ import (
 	"time"
 )
 
+type msgID string
+
+func makeMsgID() msgID {
+	return msgID(string(randSeq(8, hexa)) + "-" +
+		string(randSeq(4, hexa)) + "-" +
+		string(randSeq(4, hexa)) + "-" +
+		string(randSeq(4, hexa)) + "-" +
+		string(randSeq(12, hexa)))
+}
+
 type stepID string
 
 func (s stepID) in(steps []stepID) bool {
@@ -106,14 +116,15 @@ func (s *slots) release(step stepID, releaseEntries []itemID) []error {
 	return errs
 }
 
-var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+var alphanum = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+var hexa = []rune("abcdef0123456789")
 
-func randItemID(n int) itemID {
+func randSeq(n int, letters []rune) []rune {
 	b := make([]rune, n)
 	for i := range b {
 		b[i] = letters[rand.Intn(len(letters))]
 	}
-	return itemID(b)
+	return b
 }
 
 type generator struct {
@@ -138,7 +149,7 @@ func (g *generator) allSteps() []stepID {
 
 func (g *generator) feed(n int) {
 	for i := 0; i < n; i++ {
-		item := randItemID(6)
+		item := itemID(randSeq(10, alphanum))
 		g.pool[item] = g.allSteps()
 	}
 }
@@ -278,8 +289,17 @@ func (s *sequencer) run(in <-chan *batch, out chan<- *batch) {
 }
 
 type batch struct {
+	id    msgID
 	step  stepID
 	items []itemID
+}
+
+func newBatch(step stepID, items []itemID) *batch {
+	return &batch{
+		id:    makeMsgID(),
+		step:  step,
+		items: items,
+	}
 }
 
 func main() {
@@ -309,10 +329,7 @@ func main() {
 			step := gen.randomStep()
 			entries := gen.take(step, 4)
 			slots.await(entries)
-			in <- &batch{
-				step:  step,
-				items: entries,
-			}
+			in <- newBatch(step, entries)
 			// fmt.Printf("%s\t%v\n", step, entries)
 		}
 		close(in)
