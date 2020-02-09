@@ -184,43 +184,53 @@ type sequencer struct {
 
 	counter  int
 	batches  map[int]*batch // int is the batch number
-	received map[itemID]map[stepID]struct{}
+	received map[itemID]map[stepID]int
 	items    map[itemID]map[int]struct{}
+	full     map[itemID]struct{}
 }
 
 func newSequencer(steps []stepID) *sequencer {
 	return &sequencer{
 		steps:    steps,
 		batches:  make(map[int]*batch),
-		received: make(map[itemID]map[stepID]struct{}),
+		received: make(map[itemID]map[stepID]int),
 		items:    make(map[itemID]map[int]struct{}),
+		full:     make(map[itemID]struct{}),
 	}
 }
 
 func (s *sequencer) index(batch *batch) {
+	id := s.counter
 	if batch.step != s.steps[0] {
-		s.batches[s.counter] = batch
+		s.batches[id] = batch
 
 		for _, item := range batch.items {
 			if _, ok := s.items[item]; !ok {
 				s.items[item] = make(map[int]struct{})
 			}
-			s.items[item][s.counter] = struct{}{}
+			s.items[item][id] = struct{}{}
 		}
-
-		s.counter++
 	}
+	s.counter++
 
 	for _, item := range batch.items {
 		if _, ok := s.received[item]; !ok {
-			s.received[item] = make(map[stepID]struct{})
+			s.received[item] = make(map[stepID]int)
 		}
-		s.received[item][batch.step] = struct{}{}
+		s.received[item][batch.step] = id
+		if len(s.received[item]) == len(s.steps) {
+			s.full[item] = struct{}{}
+		}
 	}
 }
 
 func (s *sequencer) ready(step stepID, out chan<- *batch) {
-	for id, batch := range s.batches {
+	batches := make(map[int]struct{})
+	for item := range s.full {
+		batches[s.received[item][step]] = struct{}{}
+	}
+	for id := range batches {
+		batch := s.batches[id]
 		if batch.step != step {
 			continue
 		}
@@ -245,6 +255,7 @@ func (s *sequencer) ready(step stepID, out chan<- *batch) {
 				if len(s.items[item]) == 0 {
 					delete(s.items, item)
 					delete(s.received, item)
+					delete(s.full, item)
 				}
 			}
 			delete(s.batches, id)
